@@ -1,0 +1,277 @@
+import arcade
+import random
+import PIL
+
+# Definir quantidade de linhas e colunas que teremos
+qtd_linhas = 24
+qtd_colunas = 20
+
+# Define largura e a altura de cada local da grade
+largura = 23
+altura = 23
+
+# Define a margem entre cada célula e nas bordas da tela.
+margem = 5
+
+# Cálculos para descobrir as dimensões da tela
+tela_largura = (largura + margem) * qtd_colunas + margem
+tela_altura = (altura + margem) * qtd_linhas + margem
+tela_TITLE = "Tetris - 2D"
+
+cores = [
+   (0, 0, 0, 255),
+   (255, 0, 0, 255),
+   (0, 150, 0, 255),
+   (0, 0, 255, 255),
+   (255, 120, 0, 255),
+   (255, 255, 0, 255),
+   (180, 0, 255, 255),
+   (0, 220, 220, 255)
+]
+
+# Define as formas das partes individuais
+formas_tetris = [
+   [[1, 1, 1],
+    [0, 1, 0]],
+
+   [[0, 2, 2],
+    [2, 2, 0]],
+
+   [[3, 3, 0],
+    [0, 3, 3]],
+
+   [[4, 0, 0],
+    [4, 4, 4]],
+
+   [[0, 0, 5],
+    [5, 5, 5]],
+
+   [[6, 6, 6, 6]],
+
+   [[7, 7],
+    [7, 7]]
+]
+
+
+def criar_texturas():
+   """ Cria uma lista de imagemns para sprites com base nos núcleos globais. """
+   novas_texturas = []
+   for cor in cores:
+       imagem = PIL.Image.new('RGBA', (largura, altura), cor)
+       novas_texturas.append(arcade.Texture(str(cor), image = imagem))
+   return novas_texturas
+
+
+lista_textura = criar_texturas()
+
+
+def giro_antihorario(forma):
+   """ Rotates a matrix clockwise """
+   return [[forma[y][x] for y in range(len(forma))]
+           for x in range(len(forma[0]) - 1, -1, -1)]
+
+
+def verificar_colisao(quadro, forma, deslocamento):
+   """
+   Verifica se a matriz armazenada no forma fará interseção com qualquer coisa no quadro com base no deslocamento.
+   Deslocamento em uma coordenada (x, y).
+  """
+   deslocamento_x, deslocamento_y = deslocamento
+   for cy, linha in enumerate(forma):
+       for cx, celula in enumerate(linha):
+           if celula and quadro[cy + deslocamento_y][cx + deslocamento_x]:
+               return True
+   return False
+
+
+def removimentor_linha(quadro, linha):
+   """ Removimento uma linha do quadro e adiciona uma linha em branco no topo. """
+   del quadro[linha]
+   return [[0 for _ in range(qtd_colunas)]] + quadro
+
+
+def unir_matriz(matrix_1, matrix_2, matrix_2_deslocamento):
+   """ Copia a matriz 2 para a matriz 1 com base na coordenada de deslocamento x, y passada"""
+   deslocamento_x, deslocamento_y = matrix_2_deslocamento
+   for cy, linha in enumerate(matrix_2):
+       for cx, val in enumerate(linha):
+           matrix_1[cy + deslocamento_y - 1][cx + deslocamento_x] += val
+   return matrix_1
+
+
+def novo_quadro():
+   """ Cria uma grade de 0's e adiciona 1's na parte inferior para facilitar a detecção de colisão. """
+   # Cria o quadro principal de 0's
+   quadro = [[0 for _x in range(qtd_colunas)] for _y in range(qtd_linhas)]
+   # Adiciona uma borda inferior de 1's
+   quadro += [[1 for _x in range(qtd_colunas)]]
+   return quadro
+
+
+class MyGame(arcade.Window):
+   """ Classe principal do jogo """
+
+   def __init__(self, largura, altura, title):
+       """ Configuração do aplicativo. """
+
+       super().__init__(largura, altura, title)
+
+       # Carregando a imagem de fundo
+       self.background = arcade.load_texture("pikachu.png")
+
+       self.quadro = None
+       self.frame_count = 0
+       self.game_over = False
+       self.paused = False
+       self.quadro_sprite_list = None
+
+       self.stone = None
+       self.stone_x = 0
+       self.stone_y = 0
+
+   def nova_pedra(self):
+       """
+      Pega aleatoriamente uma nova pedra e defina a localização da pedra no topo.
+      Se colidir o jogo terminará imediatamente.
+      """
+       self.stone = random.choice(formas_tetris)
+       self.stone_x = int(qtd_colunas / 2 - len(self.stone[0]) / 2)
+       self.stone_y = 0
+
+       if verificar_colisao(self.quadro, self.stone, (self.stone_x, self.stone_y)):
+           self.game_over = True
+
+   def setup(self):
+       self.quadro = novo_quadro()
+
+       self.quadro_sprite_list = arcade.SpriteList()
+       for linha in range(len(self.quadro)):
+           for coluna in range(len(self.quadro[0])):
+               sprite = arcade.Sprite()
+               for texture in lista_textura:
+                   sprite.append_texture(texture)
+               sprite.set_texture(0)
+               sprite.center_x = (margem + largura) * coluna + margem + largura // 2
+               sprite.center_y = tela_altura - (margem + altura) * linha + margem + altura // 2
+
+               self.quadro_sprite_list.append(sprite)
+
+       self.nova_pedra()
+       self.update_quadro()
+
+   def drop(self):
+       """
+        Solte a pedra em um lugar.
+        Verica se há colisão.
+        Se colidiu, então juntar matrizes.
+        Verica se há linhas que podemos removimentor,
+        atualiza a lista de sprites com pedras,
+        cria uma nova pedra.
+      """
+       if not self.game_over and not self.paused:
+           self.stone_y += 1
+           if verificar_colisao(self.quadro, self.stone, (self.stone_x, self.stone_y)):
+               self.quadro = unir_matriz(self.quadro, self.stone, (self.stone_x, self.stone_y))
+               while True:
+                   for i, linha in enumerate(self.quadro[:-1]):
+                       if 0 not in linha:
+                           self.quadro = removimentor_linha(self.quadro, i)
+                           break
+                   else:
+                       break
+               self.update_quadro()
+               self.nova_pedra()
+
+   def girar_pedra(self):
+       """ Rotate the stone, check collision. """
+       if not self.game_over and not self.paused:
+           nova_pedra = giro_antihorario(self.stone)
+           if self.stone_x + len(nova_pedra[0]) >= qtd_colunas:
+               self.stone_x = qtd_colunas - len(nova_pedra[0])
+           if not verificar_colisao(self.quadro, nova_pedra, (self.stone_x, self.stone_y)):
+               self.stone = nova_pedra
+
+   def on_update(self, dt):
+       """ Atualiza e solte a pedra de garantia"""
+       self.frame_count += 1
+       if self.frame_count % 10 == 0:
+           self.drop()
+
+   def movimento(self, delta_x):
+       """ movimento a pedra para frente e para trás com base no delta x. """
+       if not self.game_over and not self.paused:
+           novo_x = self.stone_x + delta_x
+           if novo_x < 0:
+               novo_x = 0
+           if novo_x > qtd_colunas - len(self.stone[0]):
+               novo_x = qtd_colunas - len(self.stone[0])
+           if not verificar_colisao(self.quadro, self.stone, (novo_x, self.stone_y)):
+               self.stone_x = novo_x
+
+   def pressionar_tecla(self, key, modifiers):
+       """
+        Teclas pressionadas pelo usuário:
+        O usuário vai para a esquerda, movimento -1
+        O usuário vai para a direita, movimento 1
+        Girar pedra,
+        ou dropar.
+      """
+       if key == arcade.key.LEFT:
+           self.movimento(-1)
+       elif key == arcade.key.RIGHT:
+           self.movimento(1)
+       elif key == arcade.key.UP:
+           self.girar_pedra()
+       elif key == arcade.key.DOWN:
+           self.drop()
+
+   # noinspection PyMethodMayBeStatic
+   def desenhar_grade(self, grade, deslocamento_x, deslocamento_y):
+       """
+      Desenha a grade, usado para desenhar as pedras caindo,
+      o quadro é desenhado pela lista de sprites.
+      """
+       # Desenhe a grade
+       for linha in range(len(grade)):
+           for coluna in range(len(grade[0])):
+               # Escolha da cor para desenhar a caixa
+               if grade[linha][coluna]:
+                   cor = cores[grade[linha][coluna]]
+                   # Faz as contas para descobrir onde está a caixa
+                   x = (margem + largura) * (coluna + deslocamento_x) + margem + largura // 2
+                   y = tela_altura - (margem + altura) * (linha + deslocamento_y) + margem + altura // 2
+
+                   # Desenha a caixa
+                   arcade.draw_rectangle_filled(x, y, largura, altura, cor)
+
+   def update_quadro(self):
+       """
+      Atualiza a lista de sprites para refletir o conteúdo da 2ª grade.
+      """
+       for linha in range(len(self.quadro)):
+           for coluna in range(len(self.quadro[0])):
+               v = self.quadro[linha][coluna]
+               i = linha * qtd_colunas + coluna
+               self.quadro_sprite_list[i].set_texture(v)
+
+   def on_draw(self):
+       """ Renderiza a tela."""
+       arcade.start_render()
+       # Desenha a imagem de fundo
+       arcade.draw_texture_rectangle(300, 300, 600,
+                                     600, self.background)
+       # Este comando precisa ser usado antes de começarmos a desenhar.
+       self.clear()
+       self.quadro_sprite_list.draw()
+       self.desenhar_grade(self.stone, self.stone_x, self.stone_y)
+
+
+def main():
+   """ Cria a janela do jogo, configura e executa """
+   my_game = MyGame(tela_largura, tela_altura, tela_TITLE)
+   my_game.setup()
+   arcade.run()
+
+
+if __name__ == "__main__":
+   main()
